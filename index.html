@@ -41,7 +41,7 @@
             background-color: #93c5fd; /* blue-300 */
             cursor: not-allowed;
         }
-        .input-file {
+        .input-file, .input-number {
             display: block;
             width: 100%;
             padding: 0.75rem;
@@ -53,7 +53,10 @@
             outline: none;
             transition: border-color 0.3s ease;
         }
-        .input-file:focus {
+        .input-number {
+            cursor: text;
+        }
+        .input-file:focus, .input-number:focus {
             border-color: #3b82f6; /* blue-500 */
         }
         .audio-player {
@@ -109,6 +112,21 @@
             <input type="file" id="audioFile" accept="audio/mpeg, audio/wav" class="input-file">
         </div>
 
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div>
+                <label for="minNoteDuration" class="block text-gray-700 text-sm font-semibold mb-2 text-left">Duración Mínima Nota (s):</label>
+                <input type="number" id="minNoteDuration" value="0.1" step="0.01" min="0.01" class="input-number">
+            </div>
+            <div>
+                <label for="detectionThreshold" class="block text-gray-700 text-sm font-semibold mb-2 text-left">Umbral Detección:</label>
+                <input type="number" id="detectionThreshold" value="0.2" step="0.01" min="0.01" max="1.0" class="input-number">
+            </div>
+            <div>
+                <label for="hopSizeMultiplier" class="block text-gray-700 text-sm font-semibold mb-2 text-left">Tamaño Paso (ms):</label>
+                <input type="number" id="hopSizeMultiplier" value="50" step="1" min="1" class="input-number">
+            </div>
+        </div>
+
         <button id="processButton" class="button-primary w-full flex items-center justify-center" disabled>
             <span id="buttonText">Procesar Audio</span>
             <span id="loadingSpinner" class="loading-spinner hidden"></span>
@@ -133,6 +151,12 @@
         const messageContainer = document.getElementById('messageContainer');
         const synthesizedAudioPlayer = document.getElementById('synthesizedAudioPlayer');
         const audioOutputContainer = document.getElementById('audioOutputContainer');
+
+        // Nuevos elementos de entrada
+        const minNoteDurationInput = document.getElementById('minNoteDuration');
+        const detectionThresholdInput = document.getElementById('detectionThreshold');
+        const hopSizeMultiplierInput = document.getElementById('hopSizeMultiplier');
+
 
         let audioContext;
         let audioBuffer;
@@ -174,12 +198,22 @@
                 const arrayBuffer = await file.arrayBuffer();
                 audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
+                // Obtener los valores de los nuevos campos de entrada
+                const minNoteDuration = parseFloat(minNoteDurationInput.value) || 0.1;
+                const detectionThreshold = parseFloat(detectionThresholdInput.value) || 0.2;
+                const hopSizeMs = parseFloat(hopSizeMultiplierInput.value) || 50;
+
                 // --- SIMULACIÓN DE LA IA (TRANSCRIPCIÓN Y SÍNTESIS) ---
                 // En un escenario real, aquí enviarías 'audioBuffer' a tu servidor Python
                 // que tiene el modelo PyTorch, y el servidor devolvería el audio sintetizado.
                 // Aquí, simulamos el proceso en el cliente.
 
-                const simulatedMidiEvents = simulatePianoRollTranscription(audioBuffer);
+                const simulatedMidiEvents = simulatePianoRollTranscription(
+                    audioBuffer,
+                    minNoteDuration,
+                    detectionThreshold,
+                    hopSizeMs
+                );
                 const synthesizedAudioBlob = await synthesizeAudioFromMidiEvents(simulatedMidiEvents);
 
                 const audioUrl = URL.createObjectURL(synthesizedAudioBlob);
@@ -219,17 +253,18 @@
          * En un caso real, esto sería una red neuronal.
          * Aquí, simplemente detecta picos de amplitud y asigna notas aleatorias.
          * @param {AudioBuffer} buffer - El AudioBuffer de entrada.
+         * @param {number} minNoteDuration - Duración mínima de una nota en segundos.
+         * @param {number} detectionThreshold - Umbral de amplitud para detectar una "nota".
+         * @param {number} hopSizeMs - Tamaño del paso en milisegundos para la detección.
          * @returns {Array<Object>} Una lista de objetos de eventos MIDI simulados.
          */
-        function simulatePianoRollTranscription(buffer) {
+        function simulatePianoRollTranscription(buffer, minNoteDuration, detectionThreshold, hopSizeMs) {
             const sampleRate = buffer.sampleRate;
             const channelData = buffer.getChannelData(0); // Usar solo un canal
             const duration = buffer.duration;
 
             const midiEvents = [];
-            const minNoteDuration = 0.1; // segundos
-            const detectionThreshold = 0.2; // Umbral de amplitud para detectar una "nota"
-            const hopSize = Math.floor(sampleRate * 0.05); // 50ms por frame para detección
+            const hopSize = Math.floor(sampleRate * (hopSizeMs / 1000)); // Convertir ms a muestras
 
             let lastNoteTime = -minNoteDuration; // Para evitar notas muy seguidas
 
