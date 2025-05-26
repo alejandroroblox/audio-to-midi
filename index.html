@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IA de Piano Roll</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 1.5rem; /* rounded-3xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-xl */
+            padding: 2.5rem; /* p-10 */
+            max-width: 32rem; /* max-w-lg */
+            width: 100%;
+            text-align: center;
+        }
+        .button-primary {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+            padding: 0.75rem 1.5rem; /* py-3 px-6 */
+            border-radius: 0.75rem; /* rounded-xl */
+            font-weight: 600; /* font-semibold */
+            transition: background-color 0.3s ease;
+            cursor: pointer;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .button-primary:hover {
+            background-color: #2563eb; /* blue-600 */
+        }
+        .button-primary:disabled {
+            background-color: #93c5fd; /* blue-300 */
+            cursor: not-allowed;
+        }
+        .input-file {
+            display: block;
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db; /* gray-300 */
+            border-radius: 0.75rem; /* rounded-xl */
+            background-color: #f9fafb; /* gray-50 */
+            color: #1f2937; /* gray-900 */
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+        .input-file:focus {
+            border-color: #3b82f6; /* blue-500 */
+        }
+        .audio-player {
+            width: 100%;
+            margin-top: 1.5rem; /* mt-6 */
+            border-radius: 0.75rem; /* rounded-xl */
+            background-color: #e2e8f0; /* gray-200 */
+            padding: 0.5rem;
+        }
+        .message {
+            margin-top: 1rem; /* mt-4 */
+            padding: 0.75rem; /* p-3 */
+            border-radius: 0.75rem; /* rounded-xl */
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 500; /* font-medium */
+        }
+        .message.info {
+            background-color: #bfdbfe; /* blue-200 */
+            color: #1e40af; /* blue-800 */
+        }
+        .message.error {
+            background-color: #fecaca; /* red-200 */
+            color: #991b1b; /* red-800 */
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="container">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">IA de Piano Roll (Simulación)</h1>
+        <p class="text-gray-600 mb-8">
+            Sube un archivo de audio (MP3/WAV) para que la IA simule la detección de notas y las reproduzca con un sintetizador básico.
+            <br><strong class="text-red-600">Nota:</strong> La "IA" real (modelo PyTorch) no se ejecuta en el navegador. Esto es una simulación del flujo de trabajo.
+            Para una IA completa, se necesitaría un servidor backend.
+        </p>
+
+        <div class="mb-6">
+            <label for="audioFile" class="block text-gray-700 text-sm font-semibold mb-2 text-left">Selecciona un archivo de audio:</label>
+            <input type="file" id="audioFile" accept="audio/mpeg, audio/wav" class="input-file">
+        </div>
+
+        <button id="processButton" class="button-primary w-full flex items-center justify-center" disabled>
+            <span id="buttonText">Procesar Audio</span>
+            <span id="loadingSpinner" class="loading-spinner hidden"></span>
+        </button>
+
+        <div id="messageContainer" class="message info hidden"></div>
+
+        <div id="audioOutputContainer" class="mt-8 hidden">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Audio Sintetizado:</h2>
+            <audio id="synthesizedAudioPlayer" controls class="audio-player"></audio>
+            <p class="text-gray-500 text-sm mt-2">
+                (Este es un sonido sintetizado básico, no una voz como VOCALOID)
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const audioFile = document.getElementById('audioFile');
+        const processButton = document.getElementById('processButton');
+        const buttonText = document.getElementById('buttonText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const messageContainer = document.getElementById('messageContainer');
+        const synthesizedAudioPlayer = document.getElementById('synthesizedAudioPlayer');
+        const audioOutputContainer = document.getElementById('audioOutputContainer');
+
+        let audioContext;
+        let audioBuffer;
+
+        // Inicializar AudioContext al interactuar con el usuario
+        document.addEventListener('click', () => {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }, { once: true }); // Solo una vez
+
+        audioFile.addEventListener('change', (event) => {
+            if (event.target.files.length > 0) {
+                processButton.disabled = false;
+                showMessage('Archivo seleccionado. Haz clic en "Procesar Audio".', 'info');
+                audioOutputContainer.classList.add('hidden');
+                synthesizedAudioPlayer.src = '';
+            } else {
+                processButton.disabled = true;
+                showMessage('Por favor, selecciona un archivo de audio.', 'info');
+            }
+        });
+
+        processButton.addEventListener('click', async () => {
+            const file = audioFile.files[0];
+            if (!file) {
+                showMessage('No se ha seleccionado ningún archivo.', 'error');
+                return;
+            }
+
+            setLoading(true);
+            showMessage('Procesando audio... (simulación de IA)', 'info');
+
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+
+                const arrayBuffer = await file.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+                // --- SIMULACIÓN DE LA IA (TRANSCRIPCIÓN Y SÍNTESIS) ---
+                // En un escenario real, aquí enviarías 'audioBuffer' a tu servidor Python
+                // que tiene el modelo PyTorch, y el servidor devolvería el audio sintetizado.
+                // Aquí, simulamos el proceso en el cliente.
+
+                const simulatedMidiEvents = simulatePianoRollTranscription(audioBuffer);
+                const synthesizedAudioBlob = await synthesizeAudioFromMidiEvents(simulatedMidiEvents);
+
+                const audioUrl = URL.createObjectURL(synthesizedAudioBlob);
+                synthesizedAudioPlayer.src = audioUrl;
+                audioOutputContainer.classList.remove('hidden');
+                showMessage('Procesamiento completado. Audio sintetizado listo para reproducir.', 'info');
+
+            } catch (error) {
+                console.error('Error al procesar el audio:', error);
+                showMessage(`Error al procesar el audio: ${error.message}.`, 'error');
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        function setLoading(isLoading) {
+            processButton.disabled = isLoading || audioFile.files.length === 0;
+            if (isLoading) {
+                buttonText.textContent = 'Procesando...';
+                loadingSpinner.classList.remove('hidden');
+            } else {
+                buttonText.textContent = 'Procesar Audio';
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+
+        function showMessage(message, type) {
+            messageContainer.textContent = message;
+            messageContainer.className = `message ${type}`;
+            messageContainer.classList.remove('hidden');
+        }
+
+        // --- FUNCIONES DE SIMULACIÓN DE IA ---
+
+        /**
+         * Simula la transcripción de piano roll.
+         * En un caso real, esto sería una red neuronal.
+         * Aquí, simplemente detecta picos de amplitud y asigna notas aleatorias.
+         * @param {AudioBuffer} buffer - El AudioBuffer de entrada.
+         * @returns {Array<Object>} Una lista de objetos de eventos MIDI simulados.
+         */
+        function simulatePianoRollTranscription(buffer) {
+            const sampleRate = buffer.sampleRate;
+            const channelData = buffer.getChannelData(0); // Usar solo un canal
+            const duration = buffer.duration;
+
+            const midiEvents = [];
+            const minNoteDuration = 0.1; // segundos
+            const detectionThreshold = 0.2; // Umbral de amplitud para detectar una "nota"
+            const hopSize = Math.floor(sampleRate * 0.05); // 50ms por frame para detección
+
+            let lastNoteTime = -minNoteDuration; // Para evitar notas muy seguidas
+
+            for (let i = 0; i < channelData.length; i += hopSize) {
+                const frame = channelData.slice(i, i + hopSize);
+                const maxAmplitude = Math.max(...frame.map(Math.abs));
+                const currentTime = i / sampleRate;
+
+                if (maxAmplitude > detectionThreshold && (currentTime - lastNoteTime) >= minNoteDuration) {
+                    // Simular una nota MIDI aleatoria dentro de un rango de piano
+                    const midiNote = Math.floor(Math.random() * 40) + 48; // Notas MIDI 48 (C3) a 87 (B5)
+                    const durationSec = Math.random() * 0.3 + 0.1; // Duración aleatoria entre 0.1 y 0.4s
+
+                    midiEvents.push({
+                        midi_note: midiNote,
+                        start_time: currentTime,
+                        duration: durationSec
+                    });
+                    lastNoteTime = currentTime;
+                }
+            }
+            console.log('Eventos MIDI simulados:', midiEvents);
+            return midiEvents;
+        }
+
+        /**
+         * Sintetiza audio a partir de eventos MIDI simulados usando Web Audio API.
+         * @param {Array<Object>} midiEvents - Lista de eventos MIDI.
+         * @returns {Promise<Blob>} Un Blob de audio WAV.
+         */
+        async function synthesizeAudioFromMidiEvents(midiEvents) {
+            if (midiEvents.length === 0) {
+                return new Blob([], { type: 'audio/wav' });
+            }
+
+            const sampleRate = audioContext.sampleRate;
+            let maxEndTime = 0;
+            midiEvents.forEach(event => {
+                maxEndTime = Math.max(maxEndTime, event.start_time + event.duration);
+            });
+
+            const totalSamples = Math.ceil(maxEndTime * sampleRate);
+            const audioData = new Float32Array(totalSamples).fill(0);
+
+            midiEvents.forEach(event => {
+                const frequency = 440 * Math.pow(2, (event.midi_note - 69) / 12); // Convertir MIDI a Hz
+                const startSample = Math.floor(event.start_time * sampleRate);
+                const durationSamples = Math.floor(event.duration * sampleRate);
+
+                for (let i = 0; i < durationSamples; i++) {
+                    const t = i / sampleRate;
+                    // Envolvente de ataque/decaimiento simple para evitar clics
+                    let envelope = 1;
+                    const attackTime = 0.01; // 10ms
+                    const decayTime = 0.05; // 50ms
+                    if (t < attackTime) {
+                        envelope = t / attackTime;
+                    } else if (t > (event.duration - decayTime)) {
+                        envelope = (event.duration - t) / decayTime;
+                    }
+                    envelope = Math.max(0, Math.min(1, envelope)); // Asegurar que esté entre 0 y 1
+
+                    const sampleValue = 0.3 * Math.sin(2 * Math.PI * frequency * t) * envelope;
+                    if (startSample + i < totalSamples) {
+                        audioData[startSample + i] += sampleValue;
+                    }
+                }
+            });
+
+            // Normalizar el audio para evitar recortes
+            const maxVal = Math.max(...audioData.map(Math.abs));
+            if (maxVal > 1.0) {
+                for (let i = 0; i < audioData.length; i++) {
+                    audioData[i] /= maxVal;
+                }
+            }
+
+            // Crear un AudioBuffer y luego un Blob WAV
+            const outputBuffer = audioContext.createBuffer(1, totalSamples, sampleRate);
+            outputBuffer.copyToChannel(audioData, 0);
+
+            return audioBufferToWavBlob(outputBuffer);
+        }
+
+        /**
+         * Convierte un AudioBuffer a un Blob de archivo WAV.
+         * @param {AudioBuffer} audioBuffer - El AudioBuffer a convertir.
+         * @returns {Blob} Un Blob de audio WAV.
+         */
+        function audioBufferToWavBlob(audioBuffer) {
+            const numOfChan = audioBuffer.numberOfChannels;
+            const ambuf = audioBuffer.getChannelData(0); // Usar solo el primer canal
+            const len = ambuf.length * numOfChan * 2 + 44; // 2 bytes por muestra, 44 bytes de cabecera WAV
+            const buf = new ArrayBuffer(len);
+            const view = new DataView(buf);
+
+            // Cabecera WAV
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + ambuf.length * numOfChan * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true); // Formato de audio (PCM)
+            view.setUint16(22, numOfChan, true);
+            view.setUint32(24, audioBuffer.sampleRate, true);
+            view.setUint32(28, audioBuffer.sampleRate * numOfChan * 2, true); // Byte rate
+            view.setUint16(32, numOfChan * 2, true); // Block align
+            view.setUint16(34, 16, true); // Bits por muestra
+            writeString(view, 36, 'data');
+            view.setUint32(40, ambuf.length * numOfChan * 2, true);
+
+            // Datos de audio
+            let offset = 44;
+            for (let i = 0; i < ambuf.length; i++, offset += 2) {
+                let s = Math.max(-1, Math.min(1, ambuf[i])); // Recortar a +/- 1
+                s = s < 0 ? s * 0x8000 : s * 0x7FFF; // Convertir a 16-bit
+                view.setInt16(offset, s, true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+    </script>
+</body>
+</html>
